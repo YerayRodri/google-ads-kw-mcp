@@ -11,7 +11,7 @@ The official Google Ads MCP talks GAQL/REST and can't query
 use it specifically for search volume, and the official one (or
 [google-ads-write-mcp](../google-ads-write-mcp)) for everything else.
 
-## Tools
+## Tools (2)
 
 ### `get_keyword_volumes`
 
@@ -41,6 +41,15 @@ Response:
 ### `list_keyword_countries`
 
 Returns the 20 supported countries (ISO code → name).
+
+## Security
+
+- The tool ships with [MCP Tool Annotations](https://modelcontextprotocol.io/specification)
+  (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) — this server is read-only,
+  so both tools are annotated accordingly, letting MCP clients skip any confirmation prompt.
+- Execution errors propagate as real MCP protocol errors (`isError: true`), not as a JSON payload
+  that looks like a success with an `"error"` key buried inside — so the calling model actually
+  sees the failure and can self-correct instead of silently treating it as a success.
 
 ## Setup
 
@@ -88,6 +97,7 @@ below.
 | `GOOGLE_ADS_CREDENTIALS_PATH` | Path to the credentials JSON (default: `~/.config/google-ads-mcp/credentials.json`) |
 | `GOOGLE_ADS_DEVELOPER_TOKEN` | Your Google Ads developer token |
 | `GOOGLE_ADS_LOGIN_CUSTOMER_ID` | Your MCC/login customer ID, no dashes |
+| `GOOGLE_ADS_API_VERSION` | Google Ads API version (default: `v25`, pinned in `server.py`). This is deliberately fixed rather than inheriting the `google-ads` library's default, so a `pip install --upgrade google-ads` can't silently move you to a newer API version. Only override after reading the [release notes](https://developers.google.com/google-ads/api/docs/release-notes). |
 
 ## Limits
 

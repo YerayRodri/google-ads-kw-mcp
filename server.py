@@ -15,6 +15,7 @@ from pathlib import Path
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 CREDENTIALS_PATH = Path(
     os.environ.get(
@@ -22,6 +23,12 @@ CREDENTIALS_PATH = Path(
         str(Path.home() / ".config/google-ads-mcp/credentials.json"),
     )
 )
+
+# Versión de la API de Google Ads, FIJADA A PROPÓSITO (2026-08-29).
+# Sin esto se hereda el default de la librería `google-ads`, que es siempre la más
+# nueva que empaqueta: actualizar el paquete cambiaría la versión de API sola.
+# Debe mantenerse igual que en google-ads-write-mcp. Ver ../../docs/APIS.md
+GOOGLE_ADS_API_VERSION = os.environ.get("GOOGLE_ADS_API_VERSION", "v25")
 
 
 def _load_credentials() -> dict:
@@ -82,7 +89,7 @@ LANGUAGE_MAP = {
 mcp = FastMCP("google-ads-kw")
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True))
 def get_keyword_volumes(
     keywords: list[str],
     customer_id: str,
@@ -96,36 +103,38 @@ def get_keyword_volumes(
     Args:
         keywords: Array de palabras clave, máximo 20 por llamada.
                   Ejemplo: ["surf lessons", "escuela surf", "clases de surf"]
-        customer_id: ID de cuenta Google Ads (sin guiones).
         country:  Código de país ISO. Países disponibles: ES, MX, AR, CO, US, GB,
                   FR, DE, IT, BR, PT, CL, PE, EC, VE, NL, AU, CA, JP.
                   Por defecto: ES (España).
         language: Código de idioma. Disponibles: es, en, fr, de, it, pt, nl, ja, zh, ru, ar.
                   Por defecto: es (español).
+        customer_id: ID de cuenta Google Ads (sin guiones).
 
     Returns:
         JSON con lista de {keyword, avg_monthly_searches, competition, competition_index,
         low_top_of_page_bid_micros, high_top_of_page_bid_micros}
     """
     if not keywords:
-        return json.dumps({"error": "La lista de keywords no puede estar vacía."})
+        raise ValueError("La lista de keywords no puede estar vacía.")
 
     if len(keywords) > 20:
-        return json.dumps({"error": f"Máximo 20 keywords por llamada. Enviaste {len(keywords)}."})
+        raise ValueError(f"Máximo 20 keywords por llamada. Enviaste {len(keywords)}.")
 
     country_upper = country.upper()
     language_lower = language.lower()
 
     if country_upper not in COUNTRY_MAP:
         available = ", ".join(sorted(COUNTRY_MAP.keys()))
-        return json.dumps({"error": f"País '{country}' no soportado. Disponibles: {available}"})
+        raise ValueError(f"País '{country}' no soportado. Disponibles: {available}")
 
     if language_lower not in LANGUAGE_MAP:
         available = ", ".join(sorted(LANGUAGE_MAP.keys()))
-        return json.dumps({"error": f"Idioma '{language}' no soportado. Disponibles: {available}"})
+        raise ValueError(f"Idioma '{language}' no soportado. Disponibles: {available}")
 
     try:
-        client = GoogleAdsClient.load_from_dict(_load_credentials())
+        client = GoogleAdsClient.load_from_dict(
+            _load_credentials(), version=GOOGLE_ADS_API_VERSION
+        )
         kw_service = client.get_service("KeywordPlanIdeaService")
 
         request = client.get_type("GenerateKeywordHistoricalMetricsRequest")
@@ -159,16 +168,13 @@ def get_keyword_volumes(
         }, ensure_ascii=False, indent=2)
 
     except GoogleAdsException as ex:
-        errors = [
-            {"code": str(e.error_code), "message": e.message}
-            for e in ex.failure.errors
-        ]
-        return json.dumps({"error": "GoogleAdsException", "details": errors})
-    except Exception as e:
-        return json.dumps({"error": type(e).__name__, "message": str(e)})
+        errores = [f"{e.error_code}: {e.message}" for e in ex.failure.errors]
+        raise RuntimeError("GoogleAdsException — " + "; ".join(errores)) from ex
+    except Exception:
+        raise
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True))
 def list_keyword_countries() -> str:
     """
     Lista todos los países disponibles para consultar volúmenes de búsqueda.
